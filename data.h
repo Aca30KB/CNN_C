@@ -1,14 +1,15 @@
 #ifndef DATA_H
 #define DATA_H
+
 #include "image.h"
 
 typedef struct _data
 {
-    const char *filename;
-    int nbRecords;
+    const char *filename; /* naziv fajla sa podacima */
+    int nbRecords;        /* broj slogova (redova) */
 } DATA;
 
-/* funkcija za ucitavanje podataka */
-void loadData(DATA *, IMAGE *);
+/* ucitavanje podataka iz CSV fajla u niz IMAGE struktura */
+void loadData(DATA *data, IMAGE *images);
 
 #endif /* DATA_H */

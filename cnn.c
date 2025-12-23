@@ -1,95 +1,57 @@
 #include "cnn.h"
 #include <assert.h>
-#include <math.h>
-#include <gsl/gsl_math.h>
+#include <stdio.h>
 
-double leak = 0.01;
-double sigma = 1.0;
+static double leak = 0.01;
+static double sigma = 0.1;
 
-void allocCNN(CNN *cnn, int size)
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+/* Gaussian generator (Box–Muller) bez GSL-a */
+static double rand_normal(double mean, double stddev)
 {
-    int l;
-    int j;
-    int n;
-    int k;
-    cnn->L = 5;
-    cnn->alpha = 0.01;
+    double u1 = (rand() + 1.0) / (RAND_MAX + 2.0);
+    double u2 = (rand() + 1.0) / (RAND_MAX + 2.0);
+
+    double z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
+    return z0 * stddev + mean;
+}
+
+void allocCNN(CNN *cnn)
+{
+    int j, n;
+
+    cnn->alpha = 0.1; /* stopa ucenja */
     cnn->rows = 28;
     cnn->cols = 28;
-    cnn->J = 32;
-    cnn->K = 10;
-    cnn->n = cnn->rows * cnn->cols;
-
-    /* x ulazni sloj */
+    cnn->n = cnn->rows * cnn->cols; /* 784 */
+    cnn->J = 128;                   /* skriveni sloj */
+    cnn->K = 10;                    /* broj klasa */
 
     cnn->x = (double *)calloc((size_t)cnn->n, sizeof(double));
     assert(cnn->x != NULL);
 
-    /* ulazne vrednosti u cvorove skrivenih slojeva */
+    cnn->in_h = (double *)calloc((size_t)cnn->J, sizeof(double));
+    assert(cnn->in_h != NULL);
 
-    cnn->in = (double **)calloc((size_t)(cnn->L + 1), sizeof(double *));
-    assert(cnn->in != NULL);
-    for (l = 0; l < cnn->L + 1; l++)
-    {
-        if (l == cnn->L)
-        {
-            cnn->in[l] = (double *)calloc((size_t)cnn->K, sizeof(double));
-            assert(cnn->in[l] != NULL);
-        }
-        else
-        {
-            cnn->in[l] = (double *)calloc((size_t)cnn->J, sizeof(double));
-            assert(cnn->in[l] != NULL);
-        }
-    }
-    /* a  skriveni slojevi */
-
-    cnn->a = (double **)calloc((size_t)cnn->L, sizeof(double *));
+    cnn->a = (double *)calloc((size_t)cnn->J, sizeof(double));
     assert(cnn->a != NULL);
-    for (l = 0; l < cnn->L; l++)
-    {
-        cnn->a[l] = (double *)calloc((size_t)cnn->J, sizeof(double));
-        assert(cnn->a[l] != NULL);
-    }
 
-    /* izlazni sloj */
+    cnn->in_o = (double *)calloc((size_t)cnn->K, sizeof(double));
+    assert(cnn->in_o != NULL);
 
     cnn->b = (double *)calloc((size_t)cnn->K, sizeof(double));
     assert(cnn->b != NULL);
 
-    /* w_in (matrica tezina izmedju ulaznog sloja prvog skrivenog sloja) */
-
-    cnn->w_in = (double **)calloc((size_t)cnn->n + 1, sizeof(double *));
+    cnn->w_in = (double **)calloc((size_t)(cnn->n + 1), sizeof(double *));
     assert(cnn->w_in != NULL);
     for (n = 0; n < cnn->n + 1; n++)
     {
         cnn->w_in[n] = (double *)calloc((size_t)cnn->J, sizeof(double));
         assert(cnn->w_in[n] != NULL);
     }
-
-    cnn->w_in_T = (double **)calloc((size_t)cnn->J, sizeof(double *));
-    assert(cnn->w_in_T != NULL);
-    for (j = 0; j < cnn->J; j++)
-    {
-        cnn->w_in_T[j] = (double *)calloc((size_t)cnn->n + 1, sizeof(double));
-        assert(cnn->w_in_T[j] != NULL);
-    }
-
-    /* w (tezine) */
-    cnn->w = (double ***)calloc((size_t)(cnn->L), sizeof(double **));
-    assert(cnn->w != NULL);
-    for (l = 0; l < cnn->L + 1; l++)
-    {
-        cnn->w[l] = (double **)calloc((size_t)(cnn->J + 1), sizeof(double *));
-        assert(cnn->w[l] != NULL);
-        for (j = 0; j < cnn->J + 1; j++)
-        {
-            cnn->w[l][j] = (double *)calloc((size_t)cnn->J, sizeof(double));
-            assert(cnn->w[l][j] != NULL);
-        }
-    }
-
-    /* w_out (matrica tezina izmedju skrivenog slija i izlaznog sloja) */
 
     cnn->w_out = (double **)calloc((size_t)(cnn->J + 1), sizeof(double *));
     assert(cnn->w_out != NULL);
@@ -98,101 +60,48 @@ void allocCNN(CNN *cnn, int size)
         cnn->w_out[j] = (double *)calloc((size_t)cnn->K, sizeof(double));
         assert(cnn->w_out[j] != NULL);
     }
-
-    cnn->w_out_T = (double **)calloc((size_t)cnn->K, sizeof(double *));
-    for (k = 0; k < cnn->K; k++)
-    {
-        cnn->w_out_T[k] = (double *)calloc((size_t)(cnn->J + 1), sizeof(double));
-    }
 }
 
 void freeCNN(CNN *cnn)
 {
-    int l;
-    int n;
-    int j;
+    int j, n;
+
     free(cnn->x);
-    for (l = 0; l < cnn->L + 1; l++)
-    {
-        free(cnn->in[l]);
-        free(cnn->a[l]);
-        for (j = 0; j < cnn->J + 1; j++)
-        {
-            free(cnn->w[l][j]);
-        }
-    }
-    free(cnn->in);
+    free(cnn->in_h);
     free(cnn->a);
-    free(cnn->w);
+    free(cnn->in_o);
+    free(cnn->b);
+
     for (n = 0; n < cnn->n + 1; n++)
-    {
         free(cnn->w_in[n]);
-    }
     free(cnn->w_in);
+
     for (j = 0; j < cnn->J + 1; j++)
-    {
-        free(cnn->w_in_T[j]);
-    }
-    for (j = 0; j < trainSize; j++)
-    {
-        free(cnn->y[j]);
-    }
-    free(cnn->y);
-    free(cnn->w_in_T);
-}
-
-void transpose(double **a, double **t, int M, int N)
-{
-    int m;
-    int n;
-
-    for (m = 0; m < M; m++)
-    {
-        for (n = 0; n < N; n++)
-        {
-            t[n][m] = a[m][n];
-        }
-    }
+        free(cnn->w_out[j]);
+    free(cnn->w_out);
 }
 
 void initweights(CNN *cnn)
 {
-    int l;  /* brojac slojeva */
-    int k;  /* brojac izlaznog sloja */
-    int j1; /* brojac cvorova u sjrivenim slojevima */
-    int j2; /* brojac cvorova u sjrivenim slojevima */
-    int n;  /* brojac cvorova u ulaznom sloju */
+    int k, j1, n;
 
-    /* ulazni sloj */
+    /* He inicijalizacija */
+    double scale_in = sqrt(2.0 / (double)cnn->n);
+    double scale_out = sqrt(2.0 / (double)cnn->J);
 
     for (n = 0; n < cnn->n + 1; n++)
     {
         for (j1 = 0; j1 < cnn->J; j1++)
         {
-            cnn->w_in[n][j1] = gsl_ran_gaussian(r, sigma) * sqrt(1.0 / 784.0);
+            cnn->w_in[n][j1] = rand_normal(0.0, 1.0) * scale_in;
         }
     }
-
-    /* skriveni slojevi */
-
-    for (l = 0; l < cnn->L; l++)
-    {
-        for (j1 = 0; j1 < cnn->J + 1; j1++)
-        {
-            for (j2 = 0; j2 < cnn->J; j2++)
-            {
-                cnn->w[l][j1][j2] = gsl_ran_gaussian(r, sigma) * sqrt(1.0 / 32.0);
-            }
-        }
-    }
-
-    /* izlazni sloj */
 
     for (j1 = 0; j1 < cnn->J + 1; j1++)
     {
         for (k = 0; k < cnn->K; k++)
         {
-            cnn->w_out[j1][k] = gsl_ran_gaussian(r, sigma) * sqrt(1.0 / 32.0);
+            cnn->w_out[j1][k] = rand_normal(0.0, 1.0) * scale_out;
         }
     }
 }
@@ -204,297 +113,231 @@ double sigmoid(double x)
 
 double dSigmoid(double x)
 {
-    return exp(-x) / pow((1.0 + exp(-x)), 2.0);
+    double ex = exp(-x);
+    double denom = 1.0 + ex;
+    return ex / (denom * denom);
 }
 
 double ReLU(double x)
 {
-    return GSL_MAX(x, 0.0);
+    return x > 0.0 ? x : 0.0;
 }
 
 double dReLU(double x)
 {
     if (x <= 0.0)
-    {
         return leak;
-    }
     return 1.0;
 }
 
-double softmaxsum(double *b)
+void softmax(const double *b, double *y, int K)
 {
+    double max = b[0];
+    for (int m = 1; m < K; m++)
+        if (b[m] > max)
+            max = b[m];
+
     double sum = 0.0;
-    int m;
-    for (m = 0; m < 10; m++)
-    {
-        sum += exp(b[m]);
-    }
-    return sum;
+    for (int m = 0; m < K; m++)
+        sum += exp(b[m] - max);
+
+    for (int m = 0; m < K; m++)
+        y[m] = exp(b[m] - max) / sum;
 }
 
-int maxindex(double *y)
+double dot(const double *w, const double *a, int size)
 {
-    int index;
-    int m;
-    double max;
-    index = 0;
-    max = y[0];
-    for (m = 1; m < 10; m++)
-    {
-        if (max < y[m])
-        {
-            max = y[m];
-            index = m;
-        }
-    }
-    return index;
-}
-
-void softmax(double *b, double *y)
-{
-    int m;
-    double sum;
-    sum = softmaxsum(b);
-    for (m = 0; m < 10; m++)
-    {
-        y[m] = exp(b[m]) / sum;
-    }
-}
-
-double dot(double *w, double *a, int size)
-{
-    int i;
-    double sum;
-    sum = 0.0;
-    for (i = 0; i < size; i++)
+    double sum = w[0]; /* bias */
+    for (int i = 0; i < size; i++)
     {
         sum += w[i + 1] * a[i];
     }
-    sum += w[0];
     return sum;
 }
 
-void onehot(CNN *cnn, IMAGE *image, int size)
+void onehot(double **y, IMAGE *images, int size, int K)
 {
-    int i;
-    int j;
-
-    for (i = 0; i < size; i++)
+    for (int i = 0; i < size; i++)
     {
-        for (j = 0; j < cnn->J; j++)
+        for (int k = 0; k < K; k++)
         {
-            if (j == image[i].label)
-            {
-                cnn->y[i][j] = 1.0;
-            }
-            else
-            {
-                cnn->y[i][j] = 0.0;
-            }
+            y[i][k] = (k == images[i].label) ? 1.0 : 0.0;
         }
     }
 }
 
+/* forward pass za jednu sliku */
+static void forward(CNN *cnn)
+{
+    /* skriveni sloj */
+    for (int j = 0; j < cnn->J; j++) {
+        double sum = cnn->w_in[0][j]; // bias
+        for (int p = 0; p < cnn->n; p++) {
+            sum += cnn->w_in[p+1][j] * cnn->x[p];
+        }
+        cnn->in_h[j] = sum;
+        cnn->a[j] = ReLU(sum);
+    }
+
+    /* izlazni sloj */
+    for (int k = 0; k < cnn->K; k++) {
+        double sum = cnn->w_out[0][k]; // bias
+        for (int j = 0; j < cnn->J; j++) {
+            sum += cnn->w_out[j+1][k] * cnn->a[j];
+        }
+        cnn->in_o[k] = sum;
+    }
+
+    softmax(cnn->in_o, cnn->b, cnn->K);
+}
+
+
+/* ucenje: SGD po jednom primeru */
 void backPropLearning(CNN *cnn, IMAGE *train_images)
 {
-    int epoch; /* brojac epoha */
-    int n;
-    int i;          /* brojac trening slija */
-    int k;          /* brojac u izlaznom sloju */
-    int j;          /* brojac cvorova u slojevima */
-    int p;          /* brojac pijsela */
-    int l;          /* brojac slojeva */
-    int j1;         /* prvi brojac u matrici tezina */
-    int j2;         /* drugi brojac u matrici tezina */
-    int *indeks;    /* indeks trening podataka za permutovanje */
-    double **delta; /* vektor gresaka */
-    double *y_max;  /* normalizovan izlazni vektor */
-    double **y;     /* onehot matrica */
+    int batchSize = 64;
+    cnn->alpha = 0.001;  /* learning rate */
 
-    /* delta */
-    delta = (double **)calloc((size_t)(cnn->L + 1), sizeof(double *));
-    assert(delta != NULL);
-    for (l = 0; l < cnn->L + 1; l++)
-    {
-        delta[l] = (double *)calloc((size_t)cnn->J, sizeof(double));
-        assert(delta[l] != NULL);
-    }
+    double *delta_out = calloc(cnn->K, sizeof(double));
+    double *delta_hid = calloc(cnn->J, sizeof(double));
 
-    y_max = (double *)calloc((size_t)cnn->J, sizeof(double));
-    assert(y_max != NULL);
-
-    indeks = (int *)calloc((size_t)trainSize, sizeof(int));
-    assert(indeks != NULL);
-    for (i = 0; i < trainSize; i++)
-    {
-        indeks[i] = i;
-    }
-    /* onehot matrica */
-    y = (double **)calloc((size_t)size, sizeof(double *));
-    assert(cnn->y != NULL);
-    for (j = 0; j < size; j++)
-    {
-        y[j] = (double *)calloc((size_t)cnn->J, sizeof(double));
-        assert(cnn->y[j] != NULL);
-    }
-    /*onehot matrica */
-
-    onehot(cnn, train_images, trainSize);
-    /* inicijalizacija matrica tezina */
-    initweights(cnn);
-    epoch = 0;
-    do
-    {
-        /* muckanje indeksa trening seta */
-        gsl_ran_shuffle(r, indeks, (size_t)trainSize, sizeof(int));
-
-        for (i = 0; i < trainSize; i++)
-        {
-            /* inicijalizacija pocetnog sloja */
-            for (p = 0; p < train_images[0].n; p++)
-            {
-                cnn->x[p] = train_images[indeks[i]].data[p] / 255.0;
-            }
-
-            /* prostiranje unapred da bi se izracunali izlazi */
-
-            transpose(cnn->w_in, cnn->w_in_T, cnn->n, cnn->J);
-
-            /* veza izmedju ulaznog i prvog skrivenog sloja */
-            for (j = 0; j < cnn->J; j++)
-            {
-                cnn->in[0][j] = dot(cnn->w_in_T[j], cnn->x, cnn->n);
-                cnn->a[0][j] = sigmoid(cnn->in[0][j]);
-            }
-
-            transpose(cnn->w_in_T, cnn->w_in, cnn->J, cnn->n);
-
-            transpose(cnn->w_out, cnn->w_out_T, cnn->J, cnn->K);
-
-            for (l = 1; l < cnn->L + 1; l++)
-            {
-                if (l == cnn->L)
-                {
-                    for (k = 0; k < cnn->K; k++)
-                    {
-                        cnn->in[l][k] = dot(cnn->w_out_T[k], cnn->a[l - 1], cnn->J);
-                        cnn->b[k] = sigmoid(cnn->in[l][k]);
-                    }
-                }
-                else
-                {
-                    for (j = 0; j < cnn->J; j++)
-                    {
-                        cnn->in[l][j] = dot(cnn->w[l - 1][j], cnn->a[l - 1], cnn->J);
-                        cnn->a[l][j] = sigmoid(cnn->in[l][j]);
-                    }
-                }
-            }
-
-            transpose(cnn->w_out_T, cnn->w_out, cnn->K, cnn->J);
-
-            /* prostiranje unazad od izlaznog sloja ja ulaznom */
-
-            /* najpre ulazni sloj normalizujemo */
-
-            softmax(cnn->b, y_max);
-
-            for (j = 0; j < cnn->J; j++)
-            {
-                delta[cnn->L][j] = dSigmoid(cnn->in[cnn->L][j]) * (cnn->y[indeks[i]][j] - y_max[j]);
-            }
-
-            for (l = cnn->L - 1; l >= 0; l--)
-            {
-                for (j = 0; j < cnn->J; j++)
-                {
-                    delta[l][j] = dSigmoid(cnn->in[l][j]) * dot(cnn->w[l][j], delta[l], cnn->J);
-                }
-            }
-
-            /* azuriranje svake tezine koriscenjem delti */
-
-            for (l = 0; l < cnn->L; l++)
-            {
-                for (j1 = 0; j1 < cnn->J; j1++)
-                {
-                    for (j2 = 0; j2 < cnn->J; j2++)
-                    {
-                        cnn->w[l][j1][j2] = cnn->w[l][j1][j2] + cnn->alpha * cnn->a[l][j1] * delta[l][j2];
-                    }
-                }
-            }
-
-            for (n = 0; n < cnn->n; n++)
-            {
-                for (j = 0; j < cnn->J; j++)
-                {
-                    cnn->w_in[n][j] = cnn->w_in[n][j] + cnn->alpha * cnn->a[0][j] * delta[0][j];
-                }
-            }
-
-            for (j = 0; j < cnn->J + 1; j++)
-            {
-                for (k = 0; k < cnn->K; k++)
-                {
-                    cnn->w_out[j][k] = cnn->w_out[j][k] + cnn->alpha * cnn->b[k] * delta[cnn->L][j];
-                }
-            }
+    /* one-hot labela */
+    double **y = calloc(trainSize, sizeof(double *));
+    for (int i = 0; i < trainSize; i++) {
+        y[i] = calloc(cnn->K, sizeof(double));
+        for (int k = 0; k < cnn->K; k++) {
+            y[i][k] = (k == train_images[i].label) ? 1.0 : 0.0;
         }
-        fprintf(stdout, "%d\n", epoch);
-    } while (epoch++ < epochs);
-    free(delta);
-    free(indeks);
-    free(y_max);
+    }
+
+    int *indices = malloc(trainSize * sizeof(int));
+    for (int i = 0; i < trainSize; i++) indices[i] = i;
+
+    for (int epoch = 0; epoch < epochs; epoch++) {
+        /* shuffle indeksa */
+        for (int i = trainSize - 1; i > 0; i--) {
+            int j = rand() % (i + 1);
+            int tmp = indices[i]; indices[i] = indices[j]; indices[j] = tmp;
+        }
+
+        double loss = 0.0;
+
+        for (int start = 0; start < trainSize; start += batchSize) {
+            int end = (start + batchSize < trainSize) ? start + batchSize : trainSize;
+            int currentBatch = end - start;
+
+            /* gradijenti */
+            double **grad_w_in = calloc(cnn->n + 1, sizeof(double *));
+            for (int p = 0; p < cnn->n + 1; p++)
+                grad_w_in[p] = calloc(cnn->J, sizeof(double));
+
+            double **grad_w_out = calloc(cnn->J + 1, sizeof(double *));
+            for (int j = 0; j < cnn->J + 1; j++)
+                grad_w_out[j] = calloc(cnn->K, sizeof(double));
+
+            for (int ii = start; ii < end; ii++) {
+                int i = indices[ii];
+
+                /* ucitavanje slike */
+                for (int p = 0; p < cnn->n; p++)
+                    cnn->x[p] = train_images[i].data[p];
+
+                /* forward */
+                forward(cnn);
+
+                /* loss */
+                int label = train_images[i].label;
+                loss -= log(cnn->b[label] + 1e-9);
+
+                /* delta izlaz */
+                for (int k = 0; k < cnn->K; k++)
+                    delta_out[k] = cnn->b[k] - y[i][k];
+
+                /* delta skriveni sloj */
+                for (int j = 0; j < cnn->J; j++) {
+                    double sum = 0.0;
+                    for (int k = 0; k < cnn->K; k++)
+                        sum += cnn->w_out[j+1][k] * delta_out[k];
+                    delta_hid[j] = sum * dReLU(cnn->in_h[j]);
+                }
+
+                /* akumulacija gradijenata WOut */
+                for (int k = 0; k < cnn->K; k++) {
+                    grad_w_out[0][k] += delta_out[k];
+                    for (int j = 0; j < cnn->J; j++)
+                        grad_w_out[j+1][k] += delta_out[k] * cnn->a[j];
+                }
+
+                /* akumulacija gradijenata WIn */
+                for (int j = 0; j < cnn->J; j++) {
+                    grad_w_in[0][j] += delta_hid[j];
+                    for (int p = 0; p < cnn->n; p++)
+                        grad_w_in[p+1][j] += delta_hid[j] * cnn->x[p];
+                }
+            }
+
+            /* update tezina */
+            for (int k = 0; k < cnn->K; k++) {
+                cnn->w_out[0][k] -= cnn->alpha * grad_w_out[0][k] / currentBatch;
+                for (int j = 0; j < cnn->J; j++)
+                    cnn->w_out[j+1][k] -= cnn->alpha * grad_w_out[j+1][k] / currentBatch;
+            }
+
+            for (int j = 0; j < cnn->J; j++) {
+                cnn->w_in[0][j] -= cnn->alpha * grad_w_in[0][j] / currentBatch;
+                for (int p = 0; p < cnn->n; p++)
+                    cnn->w_in[p+1][j] -= cnn->alpha * grad_w_in[p+1][j] / currentBatch;
+            }
+
+            for (int p = 0; p < cnn->n + 1; p++) free(grad_w_in[p]);
+            free(grad_w_in);
+            for (int j = 0; j < cnn->J + 1; j++) free(grad_w_out[j]);
+            free(grad_w_out);
+        }
+
+        loss /= trainSize;
+        printf("Epoch %d finished, loss = %.4f\n", epoch + 1, loss);
+    }
+
+    free(indices);
+    for (int i = 0; i < trainSize; i++) free(y[i]);
+    free(y);
+    free(delta_out);
+    free(delta_hid);
 }
+
+
 
 int pogodi(CNN *cnn, IMAGE image)
 {
-    int p;
-    int j;
-    int l;
-    int k;
-    for (p = 0; p < cnn->n; p++)
+    for (int p = 0; p < cnn->n; p++)
     {
-        cnn->x[p] = image.data[p] / 255.0;
-    }
-    transpose(cnn->w_in, cnn->w_in_T, cnn->n, cnn->J);
-
-    for (j = 0; j < cnn->J; j++)
-    {
-        cnn->in[0][j] = dot(cnn->w_in_T[j], cnn->x, cnn->n);
-        cnn->a[0][j] = sigmoid(cnn->in[0][j]);
+        cnn->x[p] = image.data[p];
     }
 
-    for (l = 1; l < cnn->L; l++)
+    forward(cnn);
+
+    int idx = 0;
+    double max = cnn->b[0];
+    for (int k = 1; k < cnn->K; k++)
     {
-        for (j = 0; j < cnn->J; j++)
+        if (cnn->b[k] > max)
         {
-            cnn->in[l][j] = dot(cnn->w[l][j], cnn->a[l], cnn->J);
-            cnn->a[l][j] = sigmoid(cnn->in[l][j]);
+            max = cnn->b[k];
+            idx = k;
         }
     }
 
-    for (k = 0; k < cnn->K; k++)
-    {
-        cnn->in[cnn->L][k] = dot(cnn->w_out[k], cnn->a[cnn->L - 1], cnn->K);
-        cnn->b[k] = sigmoid(cnn->in[cnn->L][k]);
-    }
-
-    return maxindex(cnn->b);
+    return idx;
 }
 
-float test(CNN *cnn, IMAGE *image)
+float test(CNN *cnn, IMAGE *images)
 {
-    int guess;
-    int correct;
-    int m;
-    correct = 0;
-
-    for (m = 0; m < testSize; m++)
+    int correct = 0;
+    for (int m = 0; m < testSize; m++)
     {
-        guess = pogodi(cnn, image[m]);
-        if (guess == image[m].label)
+        int guess = pogodi(cnn, images[m]);
+        if (guess == images[m].label)
         {
             correct++;
         }

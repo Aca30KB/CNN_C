@@ -3,78 +3,70 @@
 #include "cnn.h"
 #include "image.h"
 #include "data.h"
-#include <unistd.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <time.h>
 
-int main(void);
-int main()
+int epochs;
+int trainSize;
+int testSize;
+
+int main(void)
 {
-
     CNN *cnn;
     IMAGE *testImages;
     IMAGE *trainImages;
     DATA *trainData;
     DATA *testData;
-    const gsl_rng_type *T;
-    /*
-        if (argc >= 2)
-        {
-            fprintf(stderr, "Proverite argumente komandne linije!\n");
-            exit(EXIT_FAILURE);
-        }*/
 
-    gsl_rng_env_setup();
-    T = gsl_rng_default;
-    r = gsl_rng_alloc(T);
-    gsl_rng_set(r, (unsigned long)getpid());
+    srand((unsigned int)time(NULL));
 
     trainSize = 60000;
     testSize = 10000;
-    epochs = 5;
+    epochs = 10;
 
-    fprintf(stdout, "%d\n", epochs);
+    printf("Broj epoha: %d\n", epochs);
 
     trainData = (DATA *)calloc(1UL, sizeof(DATA));
     trainData->filename = "mnist_train.csv";
-    trainData->nbRecords = 60000;
+    trainData->nbRecords = trainSize;
 
     testData = (DATA *)calloc(1UL, sizeof(DATA));
     testData->filename = "mnist_test.csv";
-    testData->nbRecords = 10000;
+    testData->nbRecords = testSize;
 
-    testImages = (IMAGE *)calloc((size_t)testData->nbRecords, sizeof(IMAGE));
     trainImages = (IMAGE *)calloc((size_t)trainData->nbRecords, sizeof(IMAGE));
+    testImages = (IMAGE *)calloc((size_t)testData->nbRecords, sizeof(IMAGE));
 
-    allocData(testImages, testSize);
     allocData(trainImages, trainSize);
+    allocData(testImages, testSize);
 
-    printf("Pocetak ucitavanja podataka...\n");
-
+    printf("Starting load data..\n");
     loadData(trainData, trainImages);
-    printf("Ucitani trening podaci...\n");
+    printf("Loaded train data...\n");
     loadData(testData, testImages);
-    printf("Ucitani test podaci...\n");
+    printf("Loaded test data...\n");
 
     cnn = (CNN *)calloc(1UL, sizeof(CNN));
-
     allocCNN(cnn);
-    /* inicijalizacija matrica tezina */
     initweights(cnn);
 
-    printf("Procenat uspesnosti pre treninga mreze: %f\n", test(cnn, testImages));
+    printf("Percentage of success before training: %f\n", test(cnn, testImages));
 
     backPropLearning(cnn, trainImages);
 
-    printf("Procenat uspesnosti istrenirane mreze: %f\n", test(cnn, testImages));
-
+    printf("Percentage of success after training: %f\n", test(cnn, testImages));
     freeCNN(cnn);
     free(cnn);
-    free(testImages);
-    free(trainImages);
-    free(trainData);
-    gsl_rng_free(r);
-    freeData(&trainImages, trainSize);
-    freeData(&testImages, testSize);
 
-    exit(EXIT_SUCCESS);
+    freeData(trainImages, trainSize);
+    freeData(testImages, testSize);
+
+    free(trainImages);
+    free(testImages);
+
+    free(trainData);
+    free(testData);
+
+    return 0;
 }

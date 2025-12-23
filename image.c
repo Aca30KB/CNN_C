@@ -4,8 +4,7 @@
 
 void allocData(IMAGE *images, int size)
 {
-    int m;
-    for (m = 0; m < size; m++)
+    for (int m = 0; m < size; m++)
     {
         images[m].n = 784;
         images[m].data = (double *)calloc((size_t)images[m].n, sizeof(double));
@@ -13,11 +12,12 @@ void allocData(IMAGE *images, int size)
     }
 }
 
-void freeData(IMAGE **images, int size)
+void freeData(IMAGE *images, int size)
 {
-    int m;
-    for (m = 0; m < size; m++)
+    for (int m = 0; m < size; m++)
     {
-        free(images[m]->data);
+        free(images[m].data);
+        images[m].data = NULL;
+        images[m].n = 0;
     }
 }

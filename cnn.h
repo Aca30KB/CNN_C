@@ -6,70 +6,70 @@
 #endif
 
 #include "image.h"
-#include <gsl/gsl_rng.h>
-#include <gsl/gsl_randist.h>
+#include <stdlib.h>
+#include <math.h>
 
-EXTERN gsl_rng *r;
+/* globalne promenljive */
 EXTERN int epochs;
+EXTERN int trainSize;
+EXTERN int testSize;
 
 typedef struct _cnn
 {
-    int L;            /* broj skrivenih slojeva */
-    double alpha;     /* stopa obucavanja */
-    int rows;         /* broj redova ulazne slike */
-    int cols;         /* broj kolona ulazne slike */
-    int n;            /* duzina vektora ulazne slike (rows * cols) ujedno i ulaznog sloja */
-    int J;            /* duzina vektora skrivenih slojeva */
-    int K;            /* duzina vektora izlaznog sloja */
-    double **w_in;    /* matrica tezina izmedju ulaznog i prvog skrivenog sloja (785 * 32) */
-    double **w_in_T;  /* transponovana matrica tezina izmedju ulaznog i prvog skrivenog sloja (32 * 785) */
-    double ***w;      /* niz matrica tezina u skrivenim slojevima (33 * 32) */
-    double **w_out;   /* matrica tezina izmedju skrivenog sloja i izlaznog sloja (33 * 10) */
-    double **w_out_T; /* transponovana matrica tezina izmedju skrivenog i izlaznog sloja */
-    double *x;        /* vektor ulaznog sloja (784) */
-    double **a;       /* cvorovi u skrivenim slojevima (32) */
-    double *b;        /* izlazni sloj (10) */
-    double **in;      /* vektor ulaznih vrednosti u slojeve mreze */
+    double alpha; /* stopa obucavanja */
+    int rows;     /* broj redova ulazne slike */
+    int cols;     /* broj kolona ulazne slike */
+    int n;        /* duzina vektora ulazne slike (rows * cols) */
+    int J;        /* broj neurona skrivenog sloja */
+    int K;        /* broj neurona izlaznog sloja */
+
+    double **w_in;  /* tezine ulaz -> skriveni sloj: (n + 1) x J (bias u prvom redu) */
+    double **w_out; /* tezine skriveni sloj -> izlaz: (J + 1) x K (bias u prvom redu) */
+
+    double *x;    /* ulazni vektor (n) */
+    double *in_h; /* ulaz u skriveni sloj (J) */
+    double *a;    /* aktivacije skrivenog sloja (J) */
+    double *in_o; /* ulaz u izlazni sloj (K) */
+    double *b;    /* izlazni sloj (K) */
 } CNN;
 
-/*  alokacija CNN */
-void allocCNN(CNN *);
+/* alokacija strukture CNN (unutrasnje polje) */
+void allocCNN(CNN *cnn);
 
-/* sigmoidna funkcija */
-double sigmoid(double);
-
-/* izvod sigmoidne funkcije */
-double dSigmoid(double);
-
-/* ispravljacka jedinica */
-double ReLU(double);
-
-/* izvod ispravljacke jedinice */
-double dReLU(double);
+/* oslobadjanje memorije CNN (unutrasnje polje) */
+void freeCNN(CNN *cnn);
 
 /* inicijalizacija tezina */
-void initWeights(CNN *);
+void initweights(CNN *cnn);
 
-double softmaxsum(double *);
+/* sigmoidna funkcija */
+double sigmoid(double x);
 
-void softmax(double *, double *);
+/* izvod sigmoidne funkcije */
+double dSigmoid(double x);
 
-int maxindex(double *);
+/* ReLU */
+double ReLU(double x);
 
-void initweights(CNN *);
+/* izvod ReLU (leaky) */
+double dReLU(double x);
 
-double dot(double *, double *, int);
+/* stabilan softmax (radi na vektoru b, rezultat u y) */
+void softmax(const double *b, double *y, int K);
 
-void backPropLearning(CNN *, IMAGE *);
+/* skalarni proizvod sa bias tezinskim elementom w[0] */
+double dot(const double *w, const double *a, int size);
 
-void onehot(double **, IMAGE *, int);
+/* one-hot kodiranje labela */
+void onehot(double **y, IMAGE *images, int size, int K);
 
-int pogodi(CNN *, IMAGE);
+/* ucenje mreze (SGD) */
+void backPropLearning(CNN *cnn, IMAGE *train_images);
 
-float test(CNN *, IMAGE *);
+/* predikcija jedne slike */
+int pogodi(CNN *cnn, IMAGE image);
 
-void transpose(double **, double **, int, int);
-
-void freeCNN(CNN *);
+/* testiranje tacnosti na zbirci slika */
+float test(CNN *cnn, IMAGE *images);
 
 #endif /* CNN_H */
